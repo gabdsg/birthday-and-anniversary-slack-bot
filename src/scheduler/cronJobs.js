@@ -6,7 +6,7 @@ class Scheduler {
   }
 
   start() {
-     this.slackService.checkAndSendMessages();
+    //  this.slackService.checkAndSendMessages();
     cron.schedule('0 13 * * *', async () => {
       console.log('Running scheduled check at 1:00 PM ET');
       await this.slackService.checkAndSendMessages();

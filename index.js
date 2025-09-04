@@ -10,6 +10,11 @@ async function main() {
     const slackService = new SlackService();
     await slackService.start();
     
+    // Auto-link existing users to Slack on startup
+    // console.log('Linking existing users to Slack...');
+    // const linkResults = await slackService.linkExistingUsers();
+    // console.log(`Linked ${linkResults.linked} users, ${linkResults.unmatched.length} unmatched`);
+    
     const scheduler = new Scheduler(slackService);
     scheduler.start();
     
