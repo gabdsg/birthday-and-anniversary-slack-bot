@@ -21,6 +21,10 @@ const userSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  email: {
+    type: String,
+    required: false
   }
 }, {
   timestamps: true

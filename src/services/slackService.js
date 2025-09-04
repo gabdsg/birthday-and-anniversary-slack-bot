@@ -35,7 +35,7 @@ class SlackService {
         if (user.birthday) {
           const birthday = new Date(user.birthday);
           if (birthday.getMonth() + 1 === month && birthday.getDate() === day) {
-            const message = `🎉 Happy Birthday ${user.name}! 🎂 Wishing you a fantastic day!`;
+            const message = `Wish ${user.name} a Happy Birthday! 🎂`;
             await this.sendMessage(process.env.SLACK_CHANNEL_ID, message);
             console.log(`Sent birthday message for ${user.name}`);
           }
@@ -45,7 +45,7 @@ class SlackService {
           const anniversary = new Date(user.anniversary);
           if (anniversary.getMonth() + 1 === month && anniversary.getDate() === day) {
             const yearsCount = today.getFullYear() - anniversary.getFullYear();
-            const message = `🎊 Happy ${yearsCount} Year Anniversary ${user.name}! 🥳 Thank you for being part of our team!`;
+            const message = `Celebrate ${user.name}'s ${yearsCount} year work anniversary! 🎉`;
             await this.sendMessage(process.env.SLACK_CHANNEL_ID, message);
             console.log(`Sent anniversary message for ${user.name}`);
           }
