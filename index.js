@@ -1,10 +1,23 @@
 require('dotenv').config();
+const express = require('express');
 const connectDB = require('./src/db/connection');
 const SlackService = require('./src/services/slackService');
 const Scheduler = require('./src/scheduler/cronJobs');
 
 async function main() {
   try {
+    // Start Express server for Heroku
+    const app = express();
+    const port = process.env.PORT || 3000;
+    
+    app.get('/', (req, res) => {
+      res.json({ status: 'Birthday & Anniversary Slack Bot is running!' });
+    });
+    
+    app.listen(port, () => {
+      console.log(`Server is running on port ${port}`);
+    });
+    
     await connectDB();
     
     const slackService = new SlackService();
