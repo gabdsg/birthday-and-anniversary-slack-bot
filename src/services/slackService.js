@@ -208,13 +208,54 @@ class SlackService {
     }
   }
 
+  async resolveSlackUserId(inputText) {
+    let slackUserId = null;
+    
+    // Try to extract user ID from proper mention format first
+    let userMatch = inputText.match(/<@(\w+)\|?.*?>/);
+    if (userMatch) {
+      slackUserId = userMatch[1];
+      console.log('Found proper mention format, User ID:', slackUserId);
+      return slackUserId;
+    }
+    
+    // Try to extract username from @username format
+    userMatch = inputText.match(/@(\w+)/);
+    if (userMatch) {
+      const username = userMatch[1];
+      console.log('Found username format:', username);
+      
+      // Look up the username to get the actual user ID
+      try {
+        const userList = await this.app.client.users.list();
+        const slackUser = userList.members.find(member => 
+          member.name === username || 
+          member.profile?.display_name === username ||
+          member.real_name?.toLowerCase().replace(/\s+/g, '') === username
+        );
+        
+        if (slackUser) {
+          slackUserId = slackUser.id;
+          console.log(`Resolved username "${username}" to user ID:`, slackUserId);
+          return slackUserId;
+        } else {
+          throw new Error(`Could not find Slack user with username "${username}"`);
+        }
+      } catch (lookupError) {
+        console.error('Error looking up username:', lookupError);
+        throw lookupError;
+      }
+    }
+    
+    return null;
+  }
+
   async start() {
     // Help command
     this.app.command('/birthday-help', async ({ ack, respond }) => {
       await ack();
       await respond({
         text: `*Birthday & Anniversary Bot Commands:*\n\n` +
-          `• \`/create-user "Full Name" email@domain.com\` - Create a new user in database\n` +
           `• \`/link-users\` - Auto-link existing database users to Slack users\n` +
           `• \`/manual-link "Database Name" @slackuser\` - Manually link a specific user\n` +
           `• \`/list-users\` - List all users in the database\n` +
@@ -225,51 +266,6 @@ class SlackService {
           `• \`/remove-user @user\` - Remove a user from the database\n` +
           `• \`/test-message @user\` - Send a test birthday message for a user`
       });
-    });
-
-    // Create user command
-    this.app.command('/create-user', async ({ command, ack, respond }) => {
-      await ack();
-      
-      try {
-        const text = command.text.trim();
-        const match = text.match(/^"([^"]+)"\s+(\S+@\S+\.\S+)$/);
-        
-        if (!match) {
-          await respond({ 
-            text: '❌ Usage: `/create-user "Full Name" email@domain.com`\nExample: `/create-user "John Smith" john.smith@company.com`' 
-          });
-          return;
-        }
-        
-        const name = match[1];
-        const email = match[2];
-        
-        // Check if user already exists
-        const existingUser = await User.findOne({ 
-          $or: [
-            { name: { $regex: new RegExp(name, 'i') } },
-            { email: email.toLowerCase() }
-          ]
-        });
-        
-        if (existingUser) {
-          await respond({ text: `❌ User already exists: ${existingUser.name} (${existingUser.email || 'no email'})` });
-          return;
-        }
-        
-        const newUser = await User.create({
-          name: name,
-          email: email.toLowerCase(),
-          isActive: true
-        });
-        
-        await respond({ 
-          text: `✅ Created user: ${newUser.name} (${newUser.email})\n\nNext steps:\n• Use \`/manual-link "${name}" @slackuser\` to link to Slack\n• Use \`/set-birthday @user YYYY-MM-DD\` to set birthday\n• Use \`/set-anniversary @user YYYY-MM-DD\` to set anniversary` 
-        });
-      } catch (error) {
-        await respond({ text: `❌ Error: ${error.message}` });
-      }
     });
 
     // Link existing users command
@@ -306,17 +302,32 @@ class SlackService {
       
       try {
         const text = command.text.trim();
-        const match = text.match(/^"([^"]+)"\s+<@(\w+)\|?.*?>$/);
+        const nameMatch = text.match(/^"([^"]+)"\s+(.+)$/);
         
-        if (!match) {
+        if (!nameMatch) {
           await respond({ 
             text: '❌ Usage: `/manual-link "Database User Name" @slackuser`\nExample: `/manual-link "John Smith" @john.smith`' 
           });
           return;
         }
         
-        const dbUserName = match[1];
-        const slackUserId = match[2];
+        const dbUserName = nameMatch[1];
+        const userPart = nameMatch[2];
+        
+        let slackUserId;
+        try {
+          slackUserId = await this.resolveSlackUserId(userPart);
+        } catch (error) {
+          await respond({ text: `❌ ${error.message}. Try typing @ and selecting the user from the dropdown.` });
+          return;
+        }
+        
+        if (!slackUserId) {
+          await respond({ 
+            text: '❌ Usage: `/manual-link "Database User Name" @slackuser`\nExample: `/manual-link "John Smith" @john.smith`' 
+          });
+          return;
+        }
         
         const result = await this.manualLinkUser(dbUserName, slackUserId);
         
@@ -407,13 +418,19 @@ class SlackService {
           return;
         }
         
-        const userMatch = args[0].match(/<@(\w+)\|?.*?>/);
-        if (!userMatch) {
+        let slackUserId;
+        try {
+          slackUserId = await this.resolveSlackUserId(args[0]);
+        } catch (error) {
+          await respond({ text: `❌ ${error.message}. Try typing @ and selecting the user from the dropdown.` });
+          return;
+        }
+        
+        if (!slackUserId) {
           await respond({ text: '❌ Please mention a user: `/set-birthday @user YYYY-MM-DD`' });
           return;
         }
         
-        const slackUserId = userMatch[1];
         const dateStr = args[1];
         const date = new Date(dateStr);
         
@@ -457,13 +474,18 @@ class SlackService {
           return;
         }
         
-        const userMatch = args[0].match(/<@(\w+)\|?.*?>/);
-        if (!userMatch) {
-          await respond({ text: '❌ Please mention a user: `/set-anniversary @user YYYY-MM-DD`' });
+        let slackUserId;
+        try {
+          slackUserId = await this.resolveSlackUserId(args[0]);
+        } catch (error) {
+          await respond({ text: `❌ ${error.message}. Try typing @ and selecting the user from the dropdown.` });
           return;
         }
         
-        const slackUserId = userMatch[1];
+        if (!slackUserId) {
+          await respond({ text: '❌ Please mention a user: `/set-anniversary @user YYYY-MM-DD`' });
+          return;
+        }
         const dateStr = args[1];
         const date = new Date(dateStr);
         
@@ -501,13 +523,18 @@ class SlackService {
       await ack();
       
       try {
-        const userMatch = command.text.trim().match(/<@(\w+)\|?.*?>/);
-        if (!userMatch) {
-          await respond({ text: '❌ Please mention a user: `/user-info @user`' });
+        let slackUserId;
+        try {
+          slackUserId = await this.resolveSlackUserId(command.text.trim());
+        } catch (error) {
+          await respond({ text: `❌ ${error.message}. Try typing @ and selecting the user from the dropdown.` });
           return;
         }
         
-        const slackUserId = userMatch[1];
+        if (!slackUserId) {
+          await respond({ text: '❌ Please mention a user: `/user-info @user`' });
+          return;
+        }
         const user = await User.findOne({ slackUserId });
         
         if (!user) {
@@ -532,13 +559,18 @@ class SlackService {
       await ack();
       
       try {
-        const userMatch = command.text.trim().match(/<@(\w+)\|?.*?>/);
-        if (!userMatch) {
-          await respond({ text: '❌ Please mention a user: `/remove-user @user`' });
+        let slackUserId;
+        try {
+          slackUserId = await this.resolveSlackUserId(command.text.trim());
+        } catch (error) {
+          await respond({ text: `❌ ${error.message}. Try typing @ and selecting the user from the dropdown.` });
           return;
         }
         
-        const slackUserId = userMatch[1];
+        if (!slackUserId) {
+          await respond({ text: '❌ Please mention a user: `/remove-user @user`' });
+          return;
+        }
         const user = await User.findOne({ slackUserId });
         
         if (!user) {
@@ -562,47 +594,12 @@ class SlackService {
       try {
         console.log('Test message command text:', JSON.stringify(command.text));
         
-        let slackUserId = null;
-        let extractedValue = null;
-        
-        // Try to extract user ID from proper mention format first
-        let userMatch = command.text.trim().match(/<@(\w+)\|?.*?>/);
-        if (userMatch) {
-          slackUserId = userMatch[1];
-          extractedValue = slackUserId;
-          console.log('Found proper mention format, User ID:', slackUserId);
-        } else {
-          // Try to extract username from @username format
-          userMatch = command.text.trim().match(/@(\w+)/);
-          if (userMatch) {
-            const username = userMatch[1];
-            extractedValue = username;
-            console.log('Found username format:', username);
-            
-            // Look up the username to get the actual user ID
-            try {
-              const userList = await this.app.client.users.list();
-              const slackUser = userList.members.find(member => 
-                member.name === username || 
-                member.profile?.display_name === username ||
-                member.real_name?.toLowerCase().replace(/\s+/g, '') === username
-              );
-              
-              if (slackUser) {
-                slackUserId = slackUser.id;
-                console.log(`Resolved username "${username}" to user ID:`, slackUserId);
-              } else {
-                await respond({ 
-                  text: `❌ Could not find Slack user with username "${username}". Try using a proper mention by typing @ and selecting the user from the dropdown.` 
-                });
-                return;
-              }
-            } catch (lookupError) {
-              console.error('Error looking up username:', lookupError);
-              await respond({ text: `❌ Error looking up username "${username}": ${lookupError.message}` });
-              return;
-            }
-          }
+        let slackUserId;
+        try {
+          slackUserId = await this.resolveSlackUserId(command.text.trim());
+        } catch (error) {
+          await respond({ text: `❌ ${error.message}. Try typing @ and selecting the user from the dropdown.` });
+          return;
         }
         
         if (!slackUserId) {
@@ -616,7 +613,7 @@ class SlackService {
         
         if (!user) {
           await respond({ 
-            text: `❌ User <@${slackUserId}> not found in database.\nExtracted: "${extractedValue}" → ID: ${slackUserId}\n\nThey may not be linked yet. Run \`/unlinked-users\` to see who needs linking.` 
+            text: `❌ User <@${slackUserId}> not found in database. They may not be linked yet. Run \`/unlinked-users\` to see who needs linking.` 
           });
           return;
         }
