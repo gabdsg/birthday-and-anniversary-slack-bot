@@ -52,37 +52,84 @@ class SlackService {
 
   async checkAndSendMessages() {
     const today = new Date();
-    const month = today.getMonth() + 1;
-    const day = today.getDate();
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday
+    
+    // Get dates to check based on day of week
+    const datesToCheck = this.getDatesToCheck(today, dayOfWeek);
     
     try {
       const users = await User.find({ isActive: true });
       
       for (const user of users) {
-        if (user.birthday) {
-          const birthday = new Date(user.birthday);
-          if (birthday.getMonth() + 1 === month && birthday.getDate() === day) {
-            const userMention = user.slackUserId ? `<@${user.slackUserId}>` : user.name;
-            const message = `Wish ${userMention} a Happy Birthday! 🎂`;
-            await this.sendMessage(process.env.SLACK_CHANNEL_ID, message, true, birthdayGifs[Math.floor(Math.random() * birthdayGifs.length)]);
-            console.log(`Sent birthday message for ${user.name}`);
+        for (const dateInfo of datesToCheck) {
+          // Check birthdays
+          if (user.birthday) {
+            const birthday = new Date(user.birthday);
+            if (birthday.getMonth() + 1 === dateInfo.month && birthday.getDate() === dateInfo.day) {
+              const userMention = user.slackUserId ? `<@${user.slackUserId}>` : user.name;
+              const message = dateInfo.isWeekend 
+                ? `It's ${userMention} birthday this ${dateInfo.dayName}! Wish them a Happy Birthday! 🎂`
+                : `Wish ${userMention} a Happy Birthday! 🎂`;
+              await this.sendMessage(process.env.SLACK_CHANNEL_ID, message, true, birthdayGifs[Math.floor(Math.random() * birthdayGifs.length)]);
+              console.log(`Sent birthday message for ${user.name} (${dateInfo.isWeekend ? 'weekend alert' : 'today'})`);
+            }
           }
-        }
-        
-        if (user.anniversary) {
-          const anniversary = new Date(user.anniversary);
-          if (anniversary.getMonth() + 1 === month && anniversary.getDate() === day) {
-            const yearsCount = today.getFullYear() - anniversary.getFullYear();
-            const userMention = user.slackUserId ? `<@${user.slackUserId}>` : user.name;
-            const message = `Celebrate ${userMention}'s ${yearsCount} year work anniversary! 🎉`;
-            await this.sendMessage(process.env.SLACK_CHANNEL_ID, message, true, anniversaryGifs[Math.floor(Math.random() * anniversaryGifs.length)]);
-            console.log(`Sent anniversary message for ${user.name}`);
+          
+          // Check anniversaries
+          if (user.anniversary) {
+            const anniversary = new Date(user.anniversary);
+            if (anniversary.getMonth() + 1 === dateInfo.month && anniversary.getDate() === dateInfo.day) {
+              const yearsCount = today.getFullYear() - anniversary.getFullYear();
+              const userMention = user.slackUserId ? `<@${user.slackUserId}>` : user.name;
+              const message = dateInfo.isWeekend
+                ? `${userMention} celebrates ${yearsCount} year work anniversary this ${dateInfo.dayName}! 🎊`
+                : `Celebrate ${userMention}'s ${yearsCount} year work anniversary! 🎉`;
+              await this.sendMessage(process.env.SLACK_CHANNEL_ID, message, true, anniversaryGifs[Math.floor(Math.random() * anniversaryGifs.length)]);
+              console.log(`Sent anniversary message for ${user.name} (${dateInfo.isWeekend ? 'weekend alert' : 'today'})`);
+            }
           }
         }
       }
     } catch (error) {
       console.error('Error checking dates:', error);
     }
+  }
+
+  getDatesToCheck(today, dayOfWeek) {
+    const dates = [];
+    
+    // Always check today
+    dates.push({
+      month: today.getMonth() + 1,
+      day: today.getDate(),
+      isWeekend: false,
+      dayName: 'today'
+    });
+    
+    // If it's Friday, also check Saturday and Sunday
+    if (dayOfWeek === 5) { // Friday
+      // Check Saturday
+      const saturday = new Date(today);
+      saturday.setDate(today.getDate() + 1);
+      dates.push({
+        month: saturday.getMonth() + 1,
+        day: saturday.getDate(),
+        isWeekend: true,
+        dayName: 'Saturday'
+      });
+      
+      // Check Sunday
+      const sunday = new Date(today);
+      sunday.setDate(today.getDate() + 2);
+      dates.push({
+        month: sunday.getMonth() + 1,
+        day: sunday.getDate(),
+        isWeekend: true,
+        dayName: 'Sunday'
+      });
+    }
+    
+    return dates;
   }
 
   async listSlackUsers() {
