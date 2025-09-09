@@ -127,6 +127,9 @@ class SlackService {
         isWeekend: true,
         dayName: 'Sunday'
       });
+    }else if (dayOfWeek === 6 || dayOfWeek === 7 ) { // Saturday or Sunday
+      // If it's Saturday or Sunday, do not check because it's the weekend
+      return [];
     }
     
     return dates;
