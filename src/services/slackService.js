@@ -317,7 +317,7 @@ class SlackService {
           `• \`/set-anniversary @user YYYY-MM-DD\` - Set a user's work anniversary\n` +
           `• \`/user-info @user\` - Show user's birthday and anniversary\n` +
           `• \`/remove-user @user\` - Remove a user from the database\n` +
-          `• \`/test-message @user\` - Send a test birthday message for a user`
+          `• \`/test-message message\` - Send the message as a test to the configured channel\n\n` 
       });
     });
 
@@ -646,36 +646,16 @@ class SlackService {
       
       try {
         console.log('Test message command text:', JSON.stringify(command.text));
-        
-        let slackUserId;
-        try {
-          slackUserId = await this.resolveSlackUserId(command.text.trim());
-        } catch (error) {
-          await respond({ text: `❌ ${error.message}. Try typing @ and selecting the user from the dropdown.` });
+
+        //  Extract the message from the command text
+        const testMessage = command.text.trim();
+        if (!testMessage) {
+          await respond({ text: '❌ Please provide a message to send. Usage: `/test-message message`' });
           return;
         }
-        
-        if (!slackUserId) {
-          await respond({ 
-            text: `❌ Please mention a user: \`/test-message @user\`\nReceived: "${command.text}"\nTry typing @ and selecting a user from the dropdown.` 
-          });
-          return;
-        }
-        
-        const user = await User.findOne({ slackUserId });
-        
-        if (!user) {
-          await respond({ 
-            text: `❌ User <@${slackUserId}> not found in database. They may not be linked yet. Run \`/unlinked-users\` to see who needs linking.` 
-          });
-          return;
-        }
-        
-        const userMention = `<@${user.slackUserId}>`;
-        const testMessage = `🎉 TEST: Wish ${userMention} a Happy Birthday! 🎂`;
         
         await this.sendMessage(process.env.SLACK_CHANNEL_ID, testMessage, false);
-        await respond({ text: `✅ Test message sent for <@${slackUserId}> (${user.name})` });
+        await respond({ text: `✅ Test message sent` });
       } catch (error) {
         await respond({ text: `❌ Error: ${error.message}` });
       }
