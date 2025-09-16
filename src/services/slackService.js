@@ -321,7 +321,7 @@ class SlackService {
       await ack();
       await respond({
         text: `*Celebrations Bot Commands:*\n\n` +
-          `• \`/add-user "@slackuser\` - Add a new user to the database\n` +
+          `• \`/add-user "@user\` - Add a new user to the database\n` +
           `• \`/set-birthday @user YYYY-MM-DD\` - Set a user's birthday\n` +
           `• \`/set-anniversary @user YYYY-MM-DD\` - Set a user's work anniversary\n` +
           `• \`/list-users\` - List all users in the database\n` +
