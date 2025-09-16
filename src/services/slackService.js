@@ -95,6 +95,18 @@ class SlackService {
     }
   }
 
+  getUserFullName = async (slackUserId) => {
+    try {
+      const userInfo = await this.app.client.users.info({
+        user: slackUserId
+      });
+      return userInfo.user ? userInfo.user.real_name : null;
+    } catch (error) {
+      console.error('Error fetching user full name:', error);
+      return null;
+    }
+  }
+  
   getDatesToCheck(today, dayOfWeek) {
     const dates = [];
     
@@ -310,14 +322,13 @@ class SlackService {
       await respond({
         text: `*Birthday & Anniversary Bot Commands:*\n\n` +
           `• \`/link-users\` - Auto-link existing database users to Slack users\n` +
-          `• \`/manual-link "Database Name" @slackuser\` - Manually link a specific user\n` +
           `• \`/list-users\` - List all users in the database\n` +
-          `• \`/unlinked-users\` - Show users without Slack IDs\n` +
           `• \`/set-birthday @user YYYY-MM-DD\` - Set a user's birthday\n` +
           `• \`/set-anniversary @user YYYY-MM-DD\` - Set a user's work anniversary\n` +
           `• \`/user-info @user\` - Show user's birthday and anniversary\n` +
           `• \`/remove-user @user\` - Remove a user from the database\n` +
-          `• \`/test-message message\` - Send the message as a test to the configured channel\n\n` 
+          `• \`/add-user "@slackuser\` - Add a new user to the database\n` +
+          `• \`/test-message message\` - Send the message as a test to the configured channel\n\n`
       });
     });
 
@@ -635,6 +646,31 @@ class SlackService {
         await user.save();
         
         await respond({ text: `✅ User <@${slackUserId}> has been deactivated.` });
+      } catch (error) {
+        await respond({ text: `❌ Error: ${error.message}` });
+      }
+    });
+
+    //add-user command
+    this.app.command('/add-user', async ({ command, ack, respond }) => {
+      await ack();
+      
+      try {
+        const args = command.text.trim().match(/^"([^"]+)"\s+(\S+)$/);
+        if (!args) {
+          await respond({ text: '❌ Usage: `/add-user @slackuser`' });
+          return;
+        }
+
+        const slackUserId = args[1];
+        // get full name from slack API
+        const fullName = await this.getUserFullName(slackUserId);
+
+        // Create the user in the database
+        const user = new User({ name: fullName, slackUserId });
+        await user.save();
+
+        await respond({ text: `✅ User <@${slackUserId}> has been added.` });
       } catch (error) {
         await respond({ text: `❌ Error: ${error.message}` });
       }
