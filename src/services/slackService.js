@@ -317,18 +317,17 @@ class SlackService {
 
   async start() {
     // Help command
-    this.app.command('/birthday-help', async ({ ack, respond }) => {
+    this.app.command('/celebration-bot-help', async ({ ack, respond }) => {
       await ack();
       await respond({
-        text: `*Birthday & Anniversary Bot Commands:*\n\n` +
-          `• \`/link-users\` - Auto-link existing database users to Slack users\n` +
-          `• \`/list-users\` - List all users in the database\n` +
+        text: `*Celebrations Bot Commands:*\n\n` +
+          `• \`/add-user "@slackuser\` - Add a new user to the database\n` +
           `• \`/set-birthday @user YYYY-MM-DD\` - Set a user's birthday\n` +
           `• \`/set-anniversary @user YYYY-MM-DD\` - Set a user's work anniversary\n` +
+          `• \`/list-users\` - List all users in the database\n` +
           `• \`/user-info @user\` - Show user's birthday and anniversary\n` +
           `• \`/remove-user @user\` - Remove a user from the database\n` +
-          `• \`/add-user "@slackuser\` - Add a new user to the database\n` +
-          `• \`/test-message message\` - Send the message as a test to the configured channel\n\n`
+          `\n\n`
       });
     });
 
