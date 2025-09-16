@@ -657,12 +657,23 @@ class SlackService {
       
       try {
         const args = command.text.trim().split(' ');
-        if (args.length !== 1) {
-          await respond({ text: '❌ Usage: `/add-user @slackuser`' });
+        if (args.length !== 2) {
+          await respond({ text: '❌ Usage: `/set-birthday @user YYYY-MM-DD`' });
           return;
         }
-
-        const slackUserId = args[1];
+        
+        let slackUserId;
+        try {
+          slackUserId = await this.resolveSlackUserId(args[0]);
+        } catch (error) {
+          await respond({ text: `❌ ${error.message}. Try typing @ and selecting the user from the dropdown.` });
+          return;
+        }
+        
+        if (!slackUserId) {
+          await respond({ text: '❌ Please mention a user: `/set-birthday @user YYYY-MM-DD`' });
+          return;
+        }
         // get full name from slack API
         const fullName = await this.getUserFullName(slackUserId);
 
