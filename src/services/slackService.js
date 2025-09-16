@@ -106,7 +106,7 @@ class SlackService {
       return null;
     }
   }
-  
+
   getDatesToCheck(today, dayOfWeek) {
     const dates = [];
     
@@ -656,8 +656,8 @@ class SlackService {
       await ack();
       
       try {
-        const args = command.text.trim().match(/^"([^"]+)"\s+(\S+)$/);
-        if (!args) {
+        const args = command.text.trim().split(' ');
+        if (args.length !== 1) {
           await respond({ text: '❌ Usage: `/add-user @slackuser`' });
           return;
         }
