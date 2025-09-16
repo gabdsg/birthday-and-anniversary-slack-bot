@@ -657,10 +657,7 @@ class SlackService {
       
       try {
         const args = command.text.trim().split(' ');
-        if (args.length !== 2) {
-          await respond({ text: '❌ Usage: `/set-birthday @user YYYY-MM-DD`' });
-          return;
-        }
+    
         
         let slackUserId;
         try {
