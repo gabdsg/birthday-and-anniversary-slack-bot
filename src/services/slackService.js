@@ -81,6 +81,7 @@ class SlackService {
             const anniversary = new Date(user.anniversary);
             if (anniversary.getMonth() + 1 === dateInfo.month && anniversary.getDate() === dateInfo.day) {
               const yearsCount = today.getFullYear() - anniversary.getFullYear();
+              if (yearsCount === 0) continue; // Skip if less than 1 year
               const userMention = user.slackUserId ? `<@${user.slackUserId}>` : user.name;
               const message = dateInfo.isWeekend
                 ? `${userMention} celebrates ${yearsCount} year work anniversary this ${dateInfo.dayName}! 🎊`
