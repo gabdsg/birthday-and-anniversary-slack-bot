@@ -54,6 +54,11 @@ class SlackService {
   async checkAndSendMessages() {
     const today = new Date();
     const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday
+
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      console.log('Today is weekend, skipping check.');
+      return;
+    }
     
     // Get dates to check based on day of week
     const datesToCheck = this.getDatesToCheck(today, dayOfWeek);
