@@ -2,6 +2,7 @@ const { App } = require("@slack/bolt");
 const axios = require("axios");
 const User = require("../models/User");
 const Question = require("../models/Question");
+const { checkAdminAccess } = require("../utils/adminCheck");
 
 const birthdayGifs = [
   "https://media4.giphy.com/media/v1.Y2lkPTZjMDliOTUyMTZnbzh5OWloMXZhdjNta2kwZHM0Z2xud3dva21ocnd0dWZlaHdrbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9rO5Aksmn0dHQKXJAu/giphy.gif",
@@ -432,24 +433,45 @@ class SlackService {
 
   async start() {
     // Help command
-    this.app.command("/celebration-bot-help", async ({ ack, respond }) => {
+    this.app.command("/celebration-bot-help", async ({ command, ack, respond }) => {
       await ack();
+
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/celebration-bot-help");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
+
       await respond({
         text:
-          `*Celebrations Bot Commands:*\n\n` +
+          `*Celebrations Bot Commands (Admin Only):*\n\n` +
+          `*User Management:*\n` +
           `• \`/add-user @user\` - Add a new user to the database\n` +
           `• \`/set-birthday @user YYYY-MM-DD\` - Set a user's birthday\n` +
           `• \`/set-anniversary @user YYYY-MM-DD\` - Set a user's work anniversary\n` +
-          `• \`/list-users\` - List all users in the database\n` +
-          `• \`/user-info @user\` - Show user's birthday and anniversary\n` +
           `• \`/remove-user @user\` - Remove a user from the database\n` +
-          `\n\n`,
+          `• \`/link-users\` - Auto-link database users to Slack users\n` +
+          `• \`/manual-link "DB Name" @user\` - Manually link a user\n` +
+          `• \`/unlinked-users\` - Show users not linked to Slack\n\n` +
+          `*Information:*\n` +
+          `• \`/list-users\` - List all users in the database\n` +
+          `• \`/user-info @user\` - Show user's birthday and anniversary\n\n` +
+          `*Testing:*\n` +
+          `• \`/test-message message\` - Send a test message to the channel\n`,
       });
     });
 
     // Link existing users command
-    this.app.command("/link-users", async ({ ack, respond }) => {
+    this.app.command("/link-users", async ({ command, ack, respond }) => {
       await ack();
+
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/link-users");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
 
       try {
         const linkResults = await this.linkExistingUsers();
@@ -478,6 +500,13 @@ class SlackService {
     // Manual link command
     this.app.command("/manual-link", async ({ command, ack, respond }) => {
       await ack();
+
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/manual-link");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
 
       try {
         const text = command.text.trim();
@@ -521,8 +550,15 @@ class SlackService {
     });
 
     // Show unlinked users command
-    this.app.command("/unlinked-users", async ({ ack, respond }) => {
+    this.app.command("/unlinked-users", async ({ command, ack, respond }) => {
       await ack();
+
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/unlinked-users");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
 
       try {
         const totalUsers = await User.countDocuments({ isActive: true });
@@ -573,8 +609,15 @@ class SlackService {
     });
 
     // List users command
-    this.app.command("/list-users", async ({ ack, respond }) => {
+    this.app.command("/list-users", async ({ command, ack, respond }) => {
       await ack();
+
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/list-users");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
 
       try {
         const users = await User.find({ isActive: true }).sort("name");
@@ -609,6 +652,13 @@ class SlackService {
     // Set birthday command
     this.app.command("/set-birthday", async ({ command, ack, respond }) => {
       await ack();
+
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/set-birthday");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
 
       try {
         const args = command.text.trim().split(" ");
@@ -673,6 +723,13 @@ class SlackService {
     // Set anniversary command
     this.app.command("/set-anniversary", async ({ command, ack, respond }) => {
       await ack();
+
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/set-anniversary");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
 
       try {
         const args = command.text.trim().split(" ");
@@ -739,6 +796,13 @@ class SlackService {
     this.app.command("/user-info", async ({ command, ack, respond }) => {
       await ack();
 
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/user-info");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
+
       try {
         let slackUserId;
         try {
@@ -789,6 +853,13 @@ class SlackService {
     this.app.command("/remove-user", async ({ command, ack, respond }) => {
       await ack();
 
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/remove-user");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
+
       try {
         let slackUserId;
         try {
@@ -830,6 +901,13 @@ class SlackService {
     this.app.command("/add-user", async ({ command, ack, respond }) => {
       await ack();
 
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/add-user");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
+
       try {
         const args = command.text.trim().split(" ");
 
@@ -865,6 +943,13 @@ class SlackService {
     // Test message command
     this.app.command("/test-message", async ({ command, ack, respond }) => {
       await ack();
+
+      // Check admin access
+      const adminCheck = await checkAdminAccess(command.user_id, "/test-message");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
 
       try {
         console.log("Test message command text:", JSON.stringify(command.text));
