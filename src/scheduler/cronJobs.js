@@ -1,5 +1,12 @@
 const cron = require('node-cron');
+const { BOT_TIMEZONE } = require('../utils/dates');
 
+// noOverlap: both jobs hit Slack and Mongo over the network. Without it a slow
+// run can be re-entered by the next tick and post duplicate messages.
+const OPTIONS = { timezone: BOT_TIMEZONE, noOverlap: true };
+
+// ponytail: no sent-log, so two running instances post every celebration twice.
+// Run one. Add a (userId, date, kind) collection with a unique index if you need HA.
 class Scheduler {
   constructor(slackService) {
     this.slackService = slackService;
@@ -7,32 +14,20 @@ class Scheduler {
 
   start() {
     console.log('Starting scheduler...');
-    // Schedule the job to run daily at 1:00 PM ET
-    //this.slackService.checkAndSendMessages();
+
+    // Daily at 1:00 PM. Friday's run also covers Saturday and Sunday.
     cron.schedule('0 13 * * *', async () => {
-      console.log('Running scheduled check at 1:00 PM ET');
+      console.log(`Running scheduled celebration check (${BOT_TIMEZONE})`);
       await this.slackService.checkAndSendMessages();
-    }, {
-      scheduled: true,
-      timezone: "America/New_York"
-    });
+    }, { ...OPTIONS, name: 'celebrations' });
 
-    console.log('Scheduler started - will check daily at 1:00 PM ET');
-
-
-
-    // Schedule a job to run evenry Thursday at 1:00 PM ET to send a watercooler question to watercooler channel
-    // this.slackService.sendWatercoolerQuestion();
+    // Thursdays at 1:00 PM.
     cron.schedule('0 13 * * 4', async () => {
-      console.log('Running scheduled watercooler question at 1:00 PM ET on Thursday');
+      console.log(`Running scheduled watercooler question (${BOT_TIMEZONE})`);
       await this.slackService.sendWatercoolerQuestion();
-    }, {
-      scheduled: true,
-      timezone: "America/New_York"
-    });
+    }, { ...OPTIONS, name: 'watercooler' });
 
-    console.log('Scheduler started - will send watercooler question every Thursday at 1:00 PM ET');
-
+    console.log(`Scheduler started (${BOT_TIMEZONE}) - celebrations daily at 1:00 PM, watercooler Thursdays at 1:00 PM`);
   }
 }
 

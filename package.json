@@ -5,21 +5,25 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "seed": "node src/utils/dataSeeder.js",
+    "test": "node --test test/*.test.js",
     "import-csv": "node src/utils/csvImporter.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "set-admin": "node src/utils/setAdmin.js",
+    "smoke-test": "node testSlackSync.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Slack bot that posts birthday and work-anniversary celebrations, plus a weekly watercooler question.",
   "dependencies": {
     "@slack/bolt": "^4.4.0",
-    "axios": "^1.11.0",
     "csv-parse": "^6.1.0",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "mongoose": "^8.18.0",
     "node-cron": "^4.2.1"
-  }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.17.0"
 }

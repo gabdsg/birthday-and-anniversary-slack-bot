@@ -1,8 +1,14 @@
 const { App } = require("@slack/bolt");
-const axios = require("axios");
 const User = require("../models/User");
 const Question = require("../models/Question");
 const { checkAdminAccess } = require("../utils/adminCheck");
+const {
+  fallsOn,
+  getDatesToCheck,
+  parseDateOnly,
+  yearsSince,
+  zonedParts,
+} = require("../utils/dates");
 
 const birthdayGifs = [
   "https://media4.giphy.com/media/v1.Y2lkPTZjMDliOTUyMTZnbzh5OWloMXZhdjNta2kwZHM0Z2xud3dva21ocnd0dWZlaHdrbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9rO5Aksmn0dHQKXJAu/giphy.gif",
@@ -53,113 +59,77 @@ class SlackService {
     });
   }
 
+  /** Posts to Slack. Returns false (never throws) so one bad send cannot abort a batch. */
   async sendMessage(channel, message, includeGif = false, gifUrl) {
+    if (!channel) {
+      console.error("Error sending message: no channel configured");
+      return false;
+    }
+
     try {
-      const messagePayload = {
-        token: process.env.SLACK_BOT_TOKEN,
-        channel: channel,
-        text: message,
-      };
+      const messagePayload = { channel, text: message };
 
       if (includeGif && gifUrl) {
-        if (gifUrl) {
-          messagePayload.blocks = [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: message,
-              },
-            },
-            {
-              type: "image",
-              image_url: gifUrl,
-              alt_text: message,
-            },
-          ];
-        }
+        messagePayload.blocks = [
+          { type: "section", text: { type: "mrkdwn", text: message } },
+          { type: "image", image_url: gifUrl, alt_text: message },
+        ];
       }
 
       await this.app.client.chat.postMessage(messagePayload);
+      return true;
     } catch (error) {
       console.error("Error sending message:", error);
+      return false;
     }
   }
 
   async checkAndSendMessages() {
-    const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday
+    const today = zonedParts();
+    const datesToCheck = getDatesToCheck(today);
 
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      console.log("Today is weekend, skipping check.");
+    if (datesToCheck.length === 0) {
+      console.log("Today is a weekend, skipping check.");
       return;
     }
 
-    // Get dates to check based on day of week
-    const datesToCheck = this.getDatesToCheck(today, dayOfWeek);
-
     try {
+      // ponytail: whole active roster into memory, then filter. "Same month/day, any
+      // year" cannot be indexed against a stored Date anyway. Move to a stored MM-DD
+      // field with a range query if this ever passes a few thousand people.
       const users = await User.find({ isActive: true });
 
       for (const user of users) {
         for (const dateInfo of datesToCheck) {
-          // Check birthdays
-          if (user.birthday) {
-            const birthday = new Date(user.birthday);
-            if (
-              birthday.getMonth() + 1 === dateInfo.month &&
-              birthday.getDate() === dateInfo.day
-            ) {
-              const userMention = user.slackUserId
-                ? `<@${user.slackUserId}>`
-                : user.name;
-              const message = dateInfo.isWeekend
-                ? `It's ${userMention} birthday this ${dateInfo.dayName}! Wish them a Happy Birthday! 🎂`
-                : `Wish ${userMention} a Happy Birthday! 🎂`;
-              await this.sendMessage(
-                process.env.SLACK_CHANNEL_ID,
-                message,
-                true,
-                birthdayGifs[Math.floor(Math.random() * birthdayGifs.length)]
-              );
-              console.log(
-                `Sent birthday message for ${user.name} (${
-                  dateInfo.isWeekend ? "weekend alert" : "today"
-                })`
-              );
-            }
+          const mention = user.slackUserId
+            ? `<@${user.slackUserId}>`
+            : user.name;
+
+          if (user.birthday && fallsOn(user.birthday, dateInfo)) {
+            await this.announce(
+              user,
+              dateInfo,
+              dateInfo.isWeekend
+                ? `It's ${mention}'s birthday this ${dateInfo.dayName}! Wish them a Happy Birthday! 🎂`
+                : `Wish ${mention} a Happy Birthday! 🎂`,
+              birthdayGifs
+            );
           }
 
-          // Check anniversaries
-          if (user.anniversary) {
-            const anniversary = new Date(user.anniversary);
-            if (
-              anniversary.getMonth() + 1 === dateInfo.month &&
-              anniversary.getDate() === dateInfo.day
-            ) {
-              const yearsCount =
-                today.getFullYear() - anniversary.getFullYear();
-              if (yearsCount === 0) continue; // Skip if less than 1 year
-              const userMention = user.slackUserId
-                ? `<@${user.slackUserId}>`
-                : user.name;
-              const message = dateInfo.isWeekend
-                ? `${userMention} celebrates ${yearsCount} year work anniversary this ${dateInfo.dayName}! 🎊`
-                : `Celebrate ${userMention}'s ${yearsCount} year work anniversary! 🎉`;
-              await this.sendMessage(
-                process.env.SLACK_CHANNEL_ID,
-                message,
-                true,
-                anniversaryGifs[
-                  Math.floor(Math.random() * anniversaryGifs.length)
-                ]
-              );
-              console.log(
-                `Sent anniversary message for ${user.name} (${
-                  dateInfo.isWeekend ? "weekend alert" : "today"
-                })`
-              );
-            }
+          if (user.anniversary && fallsOn(user.anniversary, dateInfo)) {
+            // Count years against the date being announced, not against today --
+            // on Fri Dec 31 the Saturday we announce belongs to the next year.
+            const years = yearsSince(user.anniversary, dateInfo);
+            if (years < 1) continue; // nothing to celebrate on day one
+
+            await this.announce(
+              user,
+              dateInfo,
+              dateInfo.isWeekend
+                ? `${mention} celebrates ${years} year work anniversary this ${dateInfo.dayName}! 🎊`
+                : `Celebrate ${mention}'s ${years} year work anniversary! 🎉`,
+              anniversaryGifs
+            );
           }
         }
       }
@@ -168,23 +138,50 @@ class SlackService {
     }
   }
 
+  async announce(user, dateInfo, message, gifs) {
+    const sent = await this.sendMessage(
+      process.env.SLACK_CHANNEL_ID,
+      message,
+      true,
+      gifs[Math.floor(Math.random() * gifs.length)]
+    );
+    const when = dateInfo.isWeekend ? `${dateInfo.dayName} alert` : "today";
+    console.log(
+      sent
+        ? `Sent celebration message for ${user.name} (${when})`
+        : `FAILED to send celebration message for ${user.name} (${when})`
+    );
+  }
+
   sendWatercoolerQuestion = async () => {
     try {
-      // Get random question from DB collection using aggregation when isUsed is false
-      const questionDoc = await Question.aggregate([
+      let [question] = await Question.aggregate([
         { $match: { isUsed: false } },
         { $sample: { size: 1 } },
       ]);
-      if (questionDoc.length > 0) {
-        const question = questionDoc[0];
-        await this.sendMessage(
-          process.env.SLACK_WATERCOOLER_CHANNEL_ID,
-          question.text
+
+      if (!question) {
+        // Pool exhausted. Recycle rather than going silent forever.
+        const { modifiedCount } = await Question.updateMany(
+          { isUsed: true },
+          { isUsed: false }
         );
-        console.log(`Sent watercooler question: ${question.text}`);
-        // Mark question as used
-        await Question.findByIdAndUpdate(question._id, { isUsed: true });
+        if (modifiedCount === 0) {
+          console.log("No watercooler questions in the database, skipping.");
+          return;
+        }
+        console.log(`Recycled ${modifiedCount} watercooler questions.`);
+        [question] = await Question.aggregate([{ $sample: { size: 1 } }]);
       }
+
+      const sent = await this.sendMessage(
+        process.env.SLACK_WATERCOOLER_CHANNEL_ID,
+        question.text
+      );
+      if (!sent) return; // leave it unused so the next run retries it
+
+      await Question.findByIdAndUpdate(question._id, { isUsed: true });
+      console.log(`Sent watercooler question: ${question.text}`);
     } catch (error) {
       console.error("Error sending watercooler question:", error);
     }
@@ -202,125 +199,96 @@ class SlackService {
     }
   };
 
-  getDatesToCheck(today, dayOfWeek) {
-    const dates = [];
+  /**
+   * Every member of the workspace. users.list is cursor-paginated -- a single
+   * call silently truncates at one page, which is why lookups used to fail in
+   * workspaces past ~200 people.
+   */
+  async fetchAllSlackMembers() {
+    const members = [];
+    let cursor;
 
-    // Always check today
-    dates.push({
-      month: today.getMonth() + 1,
-      day: today.getDate(),
-      isWeekend: false,
-      dayName: "today",
-    });
+    do {
+      const result = await this.app.client.users.list({ limit: 200, cursor });
+      members.push(...(result.members || []));
+      cursor = result.response_metadata?.next_cursor || undefined;
+    } while (cursor);
 
-    // If it's Friday, also check Saturday and Sunday
-    if (dayOfWeek === 5) {
-      // Friday
-      // Check Saturday
-      const saturday = new Date(today);
-      saturday.setDate(today.getDate() + 1);
-      dates.push({
-        month: saturday.getMonth() + 1,
-        day: saturday.getDate(),
-        isWeekend: true,
-        dayName: "Saturday",
-      });
-
-      // Check Sunday
-      const sunday = new Date(today);
-      sunday.setDate(today.getDate() + 2);
-      dates.push({
-        month: sunday.getMonth() + 1,
-        day: sunday.getDate(),
-        isWeekend: true,
-        dayName: "Sunday",
-      });
-    } else if (dayOfWeek === 6 || dayOfWeek === 7) {
-      // Saturday or Sunday
-      // If it's Saturday or Sunday, do not check because it's the weekend
-      return [];
-    }
-
-    return dates;
+    return members;
   }
 
   async listSlackUsers() {
     try {
-      const result = await this.app.client.users.list({
-        token: process.env.SLACK_BOT_TOKEN,
-      });
+      const members = await this.fetchAllSlackMembers();
 
-      if (result.ok) {
-        const activeUsers = result.members.filter(
+      return members
+        .filter(
           (member) =>
             !member.is_bot && !member.deleted && member.id !== "USLACKBOT"
-        );
-
-        return activeUsers.map((user) => ({
+        )
+        .map((user) => ({
           slackUserId: user.id,
           name: user.real_name || user.name,
           email: user.profile?.email || null,
           displayName: user.profile?.display_name || user.name,
           isActive: !user.deleted,
         }));
-      }
-
-      return [];
     } catch (error) {
       console.error("Error listing Slack users:", error);
       throw error;
     }
   }
 
+  /**
+   * Links unlinked DB users to Slack accounts by email, then by exact full name.
+   * Substring matching used to be allowed here and happily linked "Jon" to
+   * "Jonathan" -- a wrong link posts someone else's birthday to the whole company,
+   * so anything less than an exact match is left for /manual-link.
+   */
   async linkExistingUsers() {
     try {
       const slackUsers = await this.listSlackUsers();
-      const linkResults = {
-        linked: 0,
-        unmatched: [],
-        errors: [],
-      };
+      const linkResults = { linked: 0, unmatched: [], errors: [] };
 
-      // Get existing users without Slack IDs (or with temp IDs)
+      const byEmail = new Map();
+      const byName = new Map();
+      for (const slackUser of slackUsers) {
+        if (slackUser.email) byEmail.set(slackUser.email.toLowerCase(), slackUser);
+        // Ambiguous names are dropped: two "John Smith"s must be linked by hand.
+        const nameKey = slackUser.name?.trim().toLowerCase();
+        if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : slackUser);
+      }
+
       const dbUsers = await User.find({ isActive: true });
+      const claimed = new Set(
+        dbUsers.map((user) => user.slackUserId).filter(Boolean)
+      );
 
       for (const dbUser of dbUsers) {
-        try {
-          // Try to find matching Slack user by name or email
-          const matchingSlackUser = slackUsers.find((slackUser) => {
-            const nameMatch =
-              slackUser.name
-                .toLowerCase()
-                .includes(dbUser.name.toLowerCase()) ||
-              dbUser.name.toLowerCase().includes(slackUser.name.toLowerCase());
-            const emailMatch =
-              dbUser.email &&
-              slackUser.email &&
-              dbUser.email.toLowerCase() === slackUser.email.toLowerCase();
-            return nameMatch || emailMatch;
-          });
+        if (dbUser.slackUserId) continue; // already linked, leave it alone
 
-          if (matchingSlackUser) {
-            dbUser.slackUserId = matchingSlackUser.slackUserId;
-            if (matchingSlackUser.email && !dbUser.email) {
-              dbUser.email = matchingSlackUser.email;
-            }
-            await dbUser.save();
-            linkResults.linked++;
-            console.log(
-              `Linked ${dbUser.name} to Slack user ${matchingSlackUser.name}`
-            );
-          } else {
+        try {
+          const match =
+            (dbUser.email && byEmail.get(dbUser.email.trim().toLowerCase())) ||
+            byName.get(dbUser.name?.trim().toLowerCase()) ||
+            null;
+
+          if (!match || claimed.has(match.slackUserId)) {
             linkResults.unmatched.push({
               name: dbUser.name,
               email: dbUser.email || "No email",
             });
+            continue;
           }
+
+          dbUser.slackUserId = match.slackUserId;
+          if (match.email && !dbUser.email) dbUser.email = match.email;
+          await dbUser.save();
+          claimed.add(match.slackUserId);
+          linkResults.linked++;
+          console.log(`Linked ${dbUser.name} to Slack user ${match.name}`);
         } catch (error) {
-          linkResults.errors.push({
-            user: dbUser.name,
-            error: error.message,
-          });
+          linkResults.errors.push({ user: dbUser.name, error: error.message });
         }
       }
 
@@ -394,9 +362,9 @@ class SlackService {
 
       // Look up the username to get the actual user ID
       try {
-        const userList = await this.app.client.users.list();
+        const members = await this.fetchAllSlackMembers();
 
-        let slackUser = userList.members.find(
+        let slackUser = members.find(
           (member) =>
             member.name === username ||
             member.profile?.display_name === username ||
@@ -404,9 +372,8 @@ class SlackService {
         );
 
         if (!slackUser) {
-          slackUser = userList.members.find(
-            (member) =>
-              member.name === inputText.replace("@", "")
+          slackUser = members.find(
+            (member) => member.name === inputText.replace("@", "")
           );
         }
 
@@ -448,6 +415,7 @@ class SlackService {
           `*Celebrations Bot Commands (Admin Only):*\n\n` +
           `*User Management:*\n` +
           `• \`/add-user @user\` - Add a new user to the database\n` +
+          `• \`/set-admin @user\` - Grant admin rights to a user\n` +
           `• \`/set-birthday @user YYYY-MM-DD\` - Set a user's birthday\n` +
           `• \`/set-anniversary @user YYYY-MM-DD\` - Set a user's work anniversary\n` +
           `• \`/remove-user @user\` - Remove a user from the database\n` +
@@ -455,6 +423,7 @@ class SlackService {
           `• \`/manual-link "DB Name" @user\` - Manually link a user\n` +
           `• \`/unlinked-users\` - Show users not linked to Slack\n\n` +
           `*Information:*\n` +
+          `• \`/celebration-bot-help\` - Show this list\n` +
           `• \`/list-users\` - List all users in the database\n` +
           `• \`/user-info @user\` - Show user's birthday and anniversary\n\n` +
           `*Testing:*\n` +
@@ -573,7 +542,7 @@ class SlackService {
 
         if (totalUsers === 0) {
           await respond({
-            text: '❌ No users found in database! You need to create users first.\n\nUse `/create-user "Full Name" user@email.com` to add users, then link them to Slack.',
+            text: '❌ No users found in database! You need to create users first.\n\nUse `/add-user @user` to add users, or `pnpm import-csv <file>` to bulk import.',
           });
           return;
         }
@@ -685,10 +654,13 @@ class SlackService {
         }
 
         const dateStr = args[1];
-        const date = new Date(dateStr);
+        // parseDateOnly rejects 2024-02-31 instead of silently storing March 2.
+        const date = parseDateOnly(dateStr);
 
-        if (isNaN(date.getTime()) || !dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-          await respond({ text: "❌ Invalid date format. Use YYYY-MM-DD" });
+        if (!date) {
+          await respond({
+            text: "❌ Invalid date. Use YYYY-MM-DD, e.g. `1990-05-15`",
+          });
           return;
         }
 
@@ -757,10 +729,13 @@ class SlackService {
           return;
         }
         const dateStr = args[1];
-        const date = new Date(dateStr);
+        // parseDateOnly rejects 2024-02-31 instead of silently storing March 2.
+        const date = parseDateOnly(dateStr);
 
-        if (isNaN(date.getTime()) || !dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-          await respond({ text: "❌ Invalid date format. Use YYYY-MM-DD" });
+        if (!date) {
+          await respond({
+            text: "❌ Invalid date. Use YYYY-MM-DD, e.g. `1990-05-15`",
+          });
           return;
         }
 
@@ -824,7 +799,7 @@ class SlackService {
 
         if (!user) {
           await respond({
-            text: `❌ User <@${slackUserId}> not found in database. Run \`/sync-users\` or set their info.`,
+            text: `❌ User <@${slackUserId}> not found in database. Add them with \`/add-user @user\` first.`,
           });
           return;
         }
@@ -922,19 +897,79 @@ class SlackService {
         }
 
         if (!slackUserId) {
+          await respond({ text: "❌ Please mention a user: `/add-user @user`" });
+          return;
+        }
+
+        const fullName = await this.getUserFullName(slackUserId);
+        if (!fullName) {
           await respond({
-            text: "❌ Please mention a user: `/set-birthday @user YYYY-MM-DD`",
+            text: `❌ Could not read <@${slackUserId}>'s profile from Slack. Check the \`users:read\` scope.`,
           });
           return;
         }
-        // get full name from slack API
-        const fullName = await this.getUserFullName(slackUserId);
 
-        // Create the user in the database
-        const user = new User({ name: fullName, slackUserId });
-        await user.save();
+        // Upsert: slackUserId is uniquely indexed, so re-adding somebody who was
+        // deactivated by /remove-user used to blow up with a duplicate key error.
+        const existing = await User.findOne({ slackUserId });
+        if (existing) {
+          const wasInactive = !existing.isActive;
+          existing.isActive = true;
+          existing.name = fullName;
+          await existing.save();
+          await respond({
+            text: wasInactive
+              ? `✅ User <@${slackUserId}> has been reactivated.`
+              : `ℹ️ User <@${slackUserId}> is already in the database.`,
+          });
+          return;
+        }
 
+        await User.create({ name: fullName, slackUserId });
         await respond({ text: `✅ User <@${slackUserId}> has been added.` });
+      } catch (error) {
+        await respond({ text: `❌ Error: ${error.message}` });
+      }
+    });
+
+    // Grant admin rights. The FIRST admin has to be created out-of-band with
+    // `pnpm set-admin <@user|email>` -- otherwise nobody can call anything.
+    this.app.command("/set-admin", async ({ command, ack, respond }) => {
+      await ack();
+
+      const adminCheck = await checkAdminAccess(command.user_id, "/set-admin");
+      if (!adminCheck.authorized) {
+        await respond({ text: adminCheck.message });
+        return;
+      }
+
+      try {
+        let slackUserId;
+        try {
+          slackUserId = await this.resolveSlackUserId(command.text.trim());
+        } catch (error) {
+          await respond({
+            text: `❌ ${error.message}. Try typing @ and selecting the user from the dropdown.`,
+          });
+          return;
+        }
+
+        if (!slackUserId) {
+          await respond({ text: "❌ Please mention a user: `/set-admin @user`" });
+          return;
+        }
+
+        const user = await User.findOne({ slackUserId, isActive: true });
+        if (!user) {
+          await respond({
+            text: `❌ User <@${slackUserId}> not found in database. Add them with \`/add-user @user\` first.`,
+          });
+          return;
+        }
+
+        user.isAdmin = true;
+        await user.save();
+        await respond({ text: `✅ <@${slackUserId}> is now an admin.` });
       } catch (error) {
         await respond({ text: `❌ Error: ${error.message}` });
       }
